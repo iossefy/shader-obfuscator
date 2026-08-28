@@ -1,0 +1,18 @@
+.gdb_history
+
+# build output
+build*/
+cmake-build-*/
+.vscode/
+
+# Windows build artifacts
+*.exe
+*.dll
+*.a
+*.o
+*.obj
+
+# shadobf D3D build artifacts (regenerable via build_shader.py)
+shader.dxbc
+shader_dxbc.inc
+gen_shader_dxbc.exe
