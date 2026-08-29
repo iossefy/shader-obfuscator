@@ -1,26 +1,14 @@
 #!/usr/bin/env python3
-"""build_shader.py — compile shader_obfuscate.hlsl to a DXBC blob at build time.
+"""Compile shader_obfuscate.hlsl to a DXBC blob at build time.
 
-Emits `shader_dxbc.inc`, a C++ header holding the pre-compiled cs_5_0 blob as a
-byte array (kShaderDxbc / kShaderDxbcSize) plus a SHOBF_D3D11_HAVE_DXBC canary
-macro. Consumed by shader_obfuscate.hpp when SHOBF_D3D11_PRECOMPILED is defined
-so the HLSL *source* string is never embedded in the binary.
+Emits shader_dxbc.inc (a byte array + SHOBF_D3D11_HAVE_DXBC canary) for
+SHOBF_D3D11_PRECOMPILED builds, so HLSL source never ships in the binary.
 
-Blob producer (important): the default uses the tiny D3DCompile helper
-gen_shader_dxbc.cpp, i.e. d3dcompiler_47.dll's D3DCompile. That is the same
-compiler the runtime path uses, so the blob is accepted by BOTH native Windows
-D3D11 and wine's vkd3d-shader-backed CreateComputeShader. A blob from the
-standalone Windows-SDK dxc.exe is rejected by wine and is therefore only an
-opt-in (`SHOBF_PRODUCER=dxc`).
-
-Cross-platform: works on native Windows, MSYS2, and Linux (where Windows PE
-helpers are invoked through wine64). On native Windows the helper is built with
-MinGW-w64 when available and falls back to the MSVC toolchain (cl.exe under
-vcvarsall.bat) otherwise.
+Windows PE helpers run through wine64 on non-Windows hosts.
 
 Usage:
     python3 build_shader.py [--out DIR]
-    SHOBF_PRODUCER=dxc  python3 build_shader.py   # opt-in, not wine-compatible
+    SHOBF_PRODUCER=dxc  python3 build_shader.py
 """
 
 import os
@@ -39,12 +27,11 @@ WIN64_TOOLCHAIN_CANDIDATES = (
     "/opt/msvc-toolchain/Windows Kits/10/bin",
 )
 
-# MinGW C++ compiler used to build the D3DCompile helper on Windows/MSYS2.
+# MinGW C++ compiler for the D3DCompile helper on Windows/MSYS2.
 MINGW_CANDIDATES = ("x86_64-w64-mingw32-g++", "x86_64-w64-mingw32-g++-posix",
                     "g++")
 
-# Override for the MSVC vcvarsall.bat path (otherwise auto-detected via
-# vswhere / common Visual Studio install locations).
+# Override for the MSVC vcvarsall.bat path (otherwise auto-detected).
 VCVARS_ENV = "SHOBF_MSVC_VCVARS"
 
 
@@ -127,25 +114,22 @@ def compile_msvc(src: Path, out: Path, vcvarsall: str) -> bool:
 
 
 def compile_helper(out_dir: Path) -> Path:
-    """Compile gen_shader_dxbc.cpp into gen_shader_dxbc.exe and return its path."""
+    """Compile gen_shader_dxbc.cpp to a PE helper and return its path."""
     src = out_dir / HELPER
     out = out_dir / HELPER_EXE
     if out.exists():
         out.unlink()
 
-    # Prefer MinGW-w64 when present (the only option on non-Windows hosts,
-    # where the PE helper is then run under wine64).
+    # Prefer MinGW-w64 (the only option off-Windows, where the PE runs under
+    # wine64); MinGW links d3dcompiler via -ld3dcompiler.
     cxx = next((c for c in MINGW_CANDIDATES if shutil.which(c)), None)
     if cxx is not None:
-        # MinGW ships a d3dcompiler import lib, so the helper links without any
-        # external dependency (same approach the runtime build already relies on).
         proc = run([cxx, "-std=c++17", "-O2", "-s", str(src), "-o", str(out),
                     "-ld3dcompiler"])
         if proc.returncode == 0 and out.exists():
             return out
 
-    # Fall back to MSVC cl.exe on native Windows (VS / Build Tools via
-    # vcvarsall.bat), which resolves d3dcompiler.lib through the LIB env.
+    # Fall back to MSVC cl.exe on Windows (resolves d3dcompiler.lib via LIB).
     if is_win():
         vcvarsall = find_vcvarsall()
         if vcvarsall is not None:

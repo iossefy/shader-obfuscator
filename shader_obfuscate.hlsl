@@ -1,10 +1,8 @@
-// shader_obfuscate.hlsl — D3D11 compute shader for the shader_obfuscate engine.
-// Single source of truth for the HLSL. Compiled at build time by
-// build_shader.py (via d3dcompiler's D3DCompile) into a DXBC blob embedded
-// through shader_dxbc.inc when SHOBF_D3D11_PRECOMPILED is defined; otherwise
+// D3D11 compute shader Compiled at build time by build_shader.py
+// into a DXBC blob embedded through shader_dxbc.inc
+// when SHOBF_D3D11_PRECOMPILED is defined; otherwise
 // this same source is embedded in shader_obfuscate.hpp and compiled at engine
-// init via d3dcompiler_47.dll. Keep both paths byte-identical.
-//
+// init via d3dcompiler_47.dll.
 // Target profile: cs_5_0, entry point: main.
 #define MODE_HEX_DECODE   0u
 #define MODE_XOR_DECRYPT  1u

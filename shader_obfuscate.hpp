@@ -1,6 +1,6 @@
 // ============================================================================
-//  shobf — Shader Obfuscator
-//  shader_obfuscate.hpp — single-header GPU string obfuscation
+//  [shobf] Shader Obfuscator
+//  single-header GPU string obfuscation
 //  (Vulkan compute by default, Direct3D 11 via SHOBF_BACKEND_D3D11)
 // ============================================================================
 //
@@ -8,9 +8,9 @@
 //    SHOBF_OBFUSCATE(str, key)      XOR  -> raw-byte ciphertext (constexpr)
 //    SHOBF_OBFUSCATE_RC4(str, key)  RC4  -> raw-byte ciphertext (constexpr)
 //  The plaintext literal never exists in the compiled binary, and the
-//  ciphertext is stored as opaque RAW BYTES (shobf::Encrypted<N>) — nothing
-//  hex- or text-shaped shows up under strings(1). The legacy lowercase-hex
-//  form remains available via SHOBF_OBFUSCATE_HEX / SHOBF_OBFUSCATE_HEX_RC4.
+//  ciphertext is stored as opaque RAW BYTES (shobf::Encrypted<N>).
+//  The legacy lowercase-hex form remains
+//  available via SHOBF_OBFUSCATE_HEX / SHOBF_OBFUSCATE_HEX_RC4.
 //
 //  DECRYPTION happens on the GPU behind a tiny backend interface:
 //    * XOR stream cipher   (shobf::Algorithm::Xor)
@@ -24,18 +24,11 @@
 //
 //  BACKENDS
 //  --------
-//    * Vulkan   (default)     : raw Vulkan C API, SPIR-V embedded in this
-//                               header; needs vulkan.h and links vulkan-1.
-//    * Direct3D 11            : define SHOBF_BACKEND_D3D11 on a Windows
-//                               target. The compute shader can be compiled at
-//                               BUILD time into a DXBC blob (build_shader.py,
-//                               using d3dcompiler's D3DCompile) and embedded —
-//                               define SHOBF_D3D11_PRECOMPILED so the HLSL
-//                               source is not in the binary. Without that
-//                               define, HLSL source embedded here is compiled
-//                               at init via the system d3dcompiler_47.dll
-//                               (loaded dynamically — nothing to link).
-//  shobf::backendName() reports which one was compiled in.
+//  Vulkan (default): raw Vulkan API; embedded SPIR-V. Requires vulkan.h + vulkan-1.
+//  D3D11: define SHOBF_BACKEND_D3D11. Shader can be:
+//    - Precompiled DXBC: define SHOBF_D3D11_PRECOMPILED.
+//    - Runtime HLSL: compiled via d3dcompiler_47.dll.
+//  shobf::backendName() reports the active backend.
 //
 //  USAGE
 //  -----
@@ -121,13 +114,7 @@ public:
     using std::runtime_error::runtime_error;
 };
 
-// ---------------------------------------------------------------------------
-// Release configuration: define SHOBF_NO_DEBUG to strip every debug artifact
-// and disable exceptions. The library then reports failure by returning empty
-// results instead of throwing, never touches validation layers, and contains
-// no diagnostic strings. (shobf::Error remains declared for API stability,
-// but nothing throws it.)
-// ---------------------------------------------------------------------------
+// SHOBF_NO_DEBUG: no validation, no exceptions and failures return empty results.
 
 namespace detail {
 
@@ -252,11 +239,8 @@ inline std::vector<uint8_t> unpackWords(const std::vector<uint32_t>& words,
 // ---------------------------------------------------------------------------
 // Compile-time build-seed derivation (powers the Auto API).
 //
-// The build system should pass a random seed per build:
-//     -DSHOBF_BUILD_SEED=0x<16 hex digits>
-// If it is not defined, the header falls back to hashing __DATE__/__TIME__,
-// which changes on every rebuild — fine for runtime-only use, but it breaks
-// ciphertexts persisted across recompiles, so prefer an explicit seed.
+// Pass -DSHOBF_BUILD_SEED=0x<16 hex digits> for a fixed key; without it,
+// __DATE__/__TIME__ are hashed, so the key changes every rebuild.
 // ---------------------------------------------------------------------------
 
 constexpr uint64_t fnv1a(const char* s, size_t n)
@@ -342,8 +326,7 @@ struct Buffer
         SHOBF_CHECK(vkMapMemory(device, memory, 0, size, 0, &mapped));
     }
 
-    // No-op unless a previous allocation actually succeeded (guards against
-    // null-mapped memcpy in SHOBF_NO_DEBUG builds where failures are silent).
+    // No-op unless a previous allocation succeeded.
     void upload(const void* src, VkDeviceSize n) const
     {
         if (mapped && src && n <= size) memcpy(mapped, src, size_t(n));
@@ -366,9 +349,8 @@ struct Buffer
 #endif // !SHOBF_BACKEND_D3D11
 
 // ---------------------------------------------------------------------------
-// Compute shader: mode-switched hex-decode + XOR, embedded as SPIR-V.
-// GLSL source (recompile with:
-//   glslangValidator -V --target-env vulkan1.0 xor_hex.comp -o xor_hex.spv ):
+// Compute shader: mode-switched hex-decode + XOR/RC4, embedded as SPIR-V.
+// GLSL source (recompile: glslangValidator -V xor_hex.comp -o xor_hex.spv):
 // ----------------------------------------------------------------------------
 #if 0
 #version 450
@@ -505,18 +487,13 @@ void main()
 #endif
 
 // ---------------------------------------------------------------------------
-// D3D11 compute shader: same pipeline as the SPIR-V above, in HLSL. Semantics
-// are byte-identical: buffers are uint-word packed exactly like the std430
-// GLSL version, including the pad-byte and error-flagging rules.
+// D3D11 compute shader: same pipeline as the SPIR-V above, in HLSL.
 //
-// Two build modes, chosen with a compile-time switch:
-//   * SHOBF_D3D11_PRECOMPILED  — the shader is compiled at BUILD time by
-//       build_shader.py (d3dcompiler's D3DCompile) into a DXBC blob embedded
-//       via shader_dxbc.inc; the HLSL source below is NOT compiled into the
-//       binary. Only d3d11.dll is needed at runtime.
-//   * (default)                — the HLSL source string below is compiled at
-//       engine init via the system d3dcompiler_47.dll (present on every
-//       Windows 8.1+/wine install); no offline DXBC toolchain is needed.
+// Two build modes:
+//   * SHOBF_D3D11_PRECOMPILED  DXBC blob embedded via shader_dxbc.inc
+//       (built by build_shader.py). No HLSL in the binary.
+//   * (default)                HLSL string below compiled at init via the
+//       system d3dcompiler_47.dll.
 // ---------------------------------------------------------------------------
 #if defined(SHOBF_BACKEND_D3D11)
 #if !defined(SHOBF_D3D11_PRECOMPILED)
@@ -1053,32 +1030,16 @@ inline uint32_t numGroupsFor(uint32_t workItems)
     return workItems ? (workItems + kLocalSizeX - 1) / kLocalSizeX : 0u;
 }
 
-// ---------------------------------------------------------------------------
-// Backend-agnostic compute interface.
-//
-// The decryption pipeline (hex-decode dispatch, then XOR/RC4 decrypt dispatch)
-// is expressed once against IBackend; concrete implementations exist for
-// Vulkan (default, every platform) and Direct3D 11 (SHOBF_BACKEND_D3D11,
-// Windows targets). Backends own their buffers and grow them as needed;
-// Engine serializes access and translates failures to shobf::Error (or to
-// silent empty results under SHOBF_NO_DEBUG).
-// ---------------------------------------------------------------------------
+
 enum class BStatus { Ok, BadHex };
 
 class IBackend
 {
 public:
     virtual ~IBackend() = default;
-    // Bring up device + pipeline. Throws shobf::Error in debug builds when
-    // initialization fails; under SHOBF_NO_DEBUG it returns silently and
-    // ready() reports the outcome instead.
     virtual void init(bool wantValidation) = 0;
     virtual bool ready() const = 0;
-    // Upper bound on the x dimension of one Dispatch.
     virtual uint32_t maxGroupsX() const = 0;
-    // Run hex-decode + `mode` decrypt; writes exactly dataLen bytes to
-    // plainOut (dataLen == hexLen/2). badOffsetOut receives the offending
-    // character index when BStatus::BadHex is returned.
     virtual BStatus run(const char* hex, size_t hexLen,
                         const uint32_t* keyWords, size_t keyWordCount,
                         uint32_t keyLen, uint32_t mode,
@@ -1183,8 +1144,7 @@ private:
             limits_ = props.limits;
         }
 #ifdef SHOBF_NO_DEBUG
-        // With exceptions disabled, failed init must not crash later calls:
-        // ready() reports the outcome and Engine returns empty results.
+        // Exceptions off: report failure via ready() so decrypt() stays silent.
         ready_ = physicalDevice_ != VK_NULL_HANDLE &&
                  device_         != VK_NULL_HANDLE &&
                  queue_          != VK_NULL_HANDLE &&
@@ -1202,7 +1162,6 @@ private:
         if (device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(device_);
         if (pipeline_        != VK_NULL_HANDLE) vkDestroyPipeline(device_, pipeline_, nullptr);
         if (pipelineLayout_  != VK_NULL_HANDLE) vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
-        // descriptorSet_ dies with its pool
         if (descriptorPool_  != VK_NULL_HANDLE) vkDestroyDescriptorPool(device_, descriptorPool_, nullptr);
         if (setDescription_  != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device_, setDescription_, nullptr);
         if (commandPool_     != VK_NULL_HANDLE) vkDestroyCommandPool(device_, commandPool_, nullptr);
@@ -1263,7 +1222,7 @@ private:
                 vkGetInstanceProcAddr(instance_, "vkDestroyDebugUtilsMessengerEXT"));
             if (create) SHOBF_CHECK(create(instance_, &di, nullptr, &messenger_));
         }
-#endif // SHOBF_NO_DEBUG
+#endif
     }
 
     void pickPhysicalDevice()
@@ -1298,7 +1257,7 @@ private:
 #ifndef SHOBF_NO_DEBUG
             throw Error("shader_obfuscate: no device with a compute queue found");
 #endif
-            return;   // NO_DEBUG: engine will be flagged unready
+            return;
         }
     }
 
@@ -1515,17 +1474,15 @@ private:
 // ---------------------------------------------------------------------------
 // Direct3D 11 backend (SHOBF_BACKEND_D3D11, Windows targets only).
 //
-// Same pipeline as the Vulkan path: two Dispatches over word-packed buffers
-// (in/key as raw SRVs, work/stat as raw UAVs, params in a cbuffer). Buffers
-// are grown on demand; CPU<->GPU traffic goes through staging buffers.
+// Same pipeline as Vulkan: two Dispatches over word-packed buffers (in/key as
+// SRVs, work/stat as UAVs, params in a cbuffer). Buffers grow on demand;
+// CPU<->GPU traffic goes through staging buffers.
 //
-// Shader source is selected at compile time:
-//   * SHOBF_D3D11_PRECOMPILED: a DXBC blob embedded via shader_dxbc.inc
-//     (generated by build_shader.py / d3dcompiler's D3DCompile) is handed
-//     straight to CreateComputeShader — no runtime shader compilation, HLSL
-//     string absent.
-//   * otherwise: the shader is compiled once at init from kShaderHlsl via the
-//     system d3dcompiler_47.dll (loaded dynamically — no import library).
+// Shader source at compile time:
+//   * SHOBF_D3D11_PRECOMPILED DXBC blob from shader_dxbc.inc handed straight
+//     to CreateComputeShader; no HLSL string in the binary.
+//   * otherwise               compiled once at init from kShaderHlsl via
+//     the system d3dcompiler_47.dll (loaded dynamically).
 // ---------------------------------------------------------------------------
 #if defined(SHOBF_BACKEND_D3D11)
 
@@ -1596,23 +1553,11 @@ public:
 
         createViews();
 
-        // Both phases' parameters are uploaded up front; swapping constant
-        // buffers between Dispatches is more portable than updating one
-        // in-flight (some runtimes defer UpdateSubresource unpredictably).
         updateParams(paramsPhase1_, kModeHexDecode, uint32_t(hexLen), keyLen);
         updateParams(paramsPhase2_, mode,           uint32_t(hexLen), keyLen);
 
-        // --- dispatch 1: hex decode -------------------------------------
         bindAndDispatch(paramsPhase1_.get(), numGroupsFor(uint32_t(numWorkW)));
 
-        // Hand the decoded words to the read-only cipher view that
-        // dispatch 2 consumes (RWByteAddressBuffer::Load is unavailable on
-        // some D3D compilers, e.g. wine's vkd3d-shader backend). The copy
-        // keeps the stride-8 [word][status] layout of the decode output and
-        // happens with bindings cleared (CopyResource proved unreliable for
-        // CS-bound resources under some runtimes).  We use a D3D11_BOX to
-        // copy exactly the bytes we need, because ensureSlot() is grow-only
-        // and work_.buf may be larger than cipher_.buf.
         unbindAll();
         {
             const UINT copyBytes = UINT(numWorkW * 8);
@@ -1663,11 +1608,8 @@ private:
         (void)wantValidation;   // debug device is a debug-build concern only
 #endif
 
-        // Obtain the compute shader bytecode. In SHOBF_D3D11_PRECOMPILED mode
-        // it was already compiled at build time (build_shader.py via
-        // d3dcompiler's D3DCompile) into kShaderDxbc, so no runtime shader
-        // compiler is touched. Otherwise compile the embedded HLSL string at
-        // init via the system d3dcompiler_47.dll.
+        // Shader bytecode: precompiled blob in SHOBF_D3D11_PRECOMPILED mode,
+        // otherwise compiled from the HLSL string via d3dcompiler_47.dll.
         const void*    codePtr = nullptr;
         SIZE_T         codeSize = 0;
         ID3DBlob*      compiled = nullptr;
@@ -1752,8 +1694,7 @@ private:
                               dev_.put(), &featureLevel_, ctx_.put());
 #ifndef SHOBF_NO_DEBUG
         if (FAILED(hr) && wantValidation) {
-            // The debug layer is an optional Windows feature (Graphics
-            // Tools); fall back to a plain device so debugging still works.
+            // Debug layer is optional (Graphics Tools); fall back to plain.
             flags = 0;
             hr = createFn(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
                           wanted, UINT(ARRAYSIZE(wanted)), D3D11_SDK_VERSION,
@@ -1812,9 +1753,6 @@ private:
 
     enum Bind { BIND_SRV, BIND_UAV };   // kept for call-site readability
 
-    // One pipeline resource: the GPU buffer plus matching STAGING mirrors.
-    // CopyResource requires identical ByteWidth on both ends, so all three
-    // are grown together (grow-only across calls).
     struct Slot
     {
         ComPtr<ID3D11Buffer> buf;    // device-local
@@ -1827,9 +1765,6 @@ private:
     {
         if (s.buf.get() && s.cap >= bytes) return;
 
-        // All pipeline buffers share one descriptor shape (both bind flags,
-        // raw-view misc): some D3D runtimes reject CopyResource between
-        // buffers whose descriptors differ.
         D3D11_BUFFER_DESC d{};
         d.ByteWidth = UINT(bytes);
         d.Usage     = D3D11_USAGE_DEFAULT;
@@ -1868,8 +1803,8 @@ private:
         ctx_->Unmap(s.stDown.get(), 0);
     }
 
-    // Raw byte-addressed views over the current buffers; recreated whenever
-    // a buffer grew (views pin their buffer).
+    // Raw byte-address views over the current buffers; recreated when a
+    // buffer grows (views pin their buffer).
     void createViews()
     {
         srvIn_.reset(); srvKey_.reset(); srvCipher_.reset();
@@ -1980,9 +1915,7 @@ public:
         return engine;
     }
 
-    // Runs both dispatches for `hex` against `keyWords`/`keyLen`;
-    // returns the plaintext bytes. Throws shobf::Error on any problem
-    // (returns an empty vector instead when built with SHOBF_NO_DEBUG).
+    // Runs both dispatches for `hex`; returns the plaintext bytes.
     std::vector<uint8_t> decrypt(std::string_view hex,
                                  const std::vector<uint32_t>& keyWords,
                                  uint32_t keyLen, uint32_t secondPhaseMode)
@@ -2030,19 +1963,18 @@ private:
     std::unique_ptr<IBackend> backend_;
 };
 
-} // namespace detail
+}
 
 // ===========================================================================
 // Public API
 // ===========================================================================
 
-// Cipher selection for decryption. Xor: byte i ^= key[i % keyLen]. Rc4:
-// classic RC4 keystream (KSA + PRGA) executed on the GPU. Encryption with
-// either cipher happens at compile time via SHOBF_OBFUSCATE[_RC4].
+// XOR: byte i ^= key[i % keyLen]. Rc4: classic RC4 keystream on the GPU.
+// Encryption happens at compile time via SHOBF_OBFUSCATE[_RC4].
 enum class Algorithm { Xor, Rc4 };
 
-// Name of the compute backend compiled in ("vulkan" by default, "d3d11"
-// with SHOBF_BACKEND_D3D11).
+// Name of the compiled-in backend ("vulkan" by default, "d3d11" with
+// SHOBF_BACKEND_D3D11).
 inline const char* backendName()
 {
 #if defined(SHOBF_BACKEND_D3D11)
@@ -2057,11 +1989,10 @@ inline uint32_t secondPhaseModeFor(Algorithm a)
 {
     return a == Algorithm::Rc4 ? kModeRc4Decrypt : kModeXorDecrypt;
 }
-} // namespace detail
+}
 
-// Opt into Khronos validation layers (debugging). Must be called before the
-// first crypto call; SHOBF_VALIDATION=1 achieves the same. No-op (and the
-// validation machinery is not compiled at all) when SHOBF_NO_DEBUG is defined.
+// Opt into Khronos validation layers (debugging). Call before the first
+// crypto call; SHOBF_VALIDATION=1 is equivalent. No-op when SHOBF_NO_DEBUG.
 inline void setValidationEnabled(bool enabled)
 {
 #ifndef SHOBF_NO_DEBUG
@@ -2075,9 +2006,8 @@ inline void setValidationEnabled(bool enabled)
 // Variation 1: explicit key.
 // --------------------------------------------------------------------------
 
-// Decrypt a hex ciphertext with `key`; returns raw plaintext bytes.
-// Throws shobf::Error on bad input (returns an empty vector instead when
-// built with SHOBF_NO_DEBUG).
+// Decrypt a hex ciphertext with `key`; returns raw bytes. Throws shobf::Error
+// on bad input (empty vector under SHOBF_NO_DEBUG).
 inline std::vector<uint8_t> decryptBytes(std::string_view hexCipher,
                                          std::string_view key,
                                          Algorithm algo = Algorithm::Xor)
@@ -2109,23 +2039,16 @@ inline std::string decrypt(std::string_view hexCipher, std::string_view key,
 // SHOBF_OBFUSCATE(str, key)      XOR-encrypts  -> use with Algorithm::Xor
 // SHOBF_OBFUSCATE_RC4(str, key)  RC4-encrypts  -> use with Algorithm::Rc4
 //
-// Both macros expand to an immediate lambda evaluated entirely at COMPILE
-// time, yielding an shobf::Encrypted<N> that holds the RAW ciphertext bytes.
-// The plaintext literal never reaches the binary; only opaque binary data
-// does, so nothing hex- or text-shaped shows up under strings(1).
-// Pass the result straight back to decrypt()/decryptBytes() through the
-// typed overloads:
+// Both macros expand to a lambda evaluated at compile time, yielding an
+// shobf::Encrypted<N> holding RAW ciphertext bytes.
 //
 //     shobf::decrypt(SHOBF_OBFUSCATE("secret", "vulkan"), "vulkan");
 //
-// If you want the old lowercase-hex form (eyeballing ciphertexts, cross-
-// checking against external tools), use SHOBF_OBFUSCATE_HEX /
-// SHOBF_OBFUSCATE_HEX_RC4 instead; their shobf::Obfuscated<N> result feeds
-// the same decrypt functions via its string_view conversion.
+// For the old lowercase-hex form use SHOBF_OBFUSCATE_HEX / _HEX_RC4 (their
+// shobf::Obfuscated<N> feeds the same decrypt functions via string_view).
 //
-// `str` must be a non-empty string literal (its bytes are consumed by the
-// compiler). `key` may be a string literal OR any constexpr key object such
-// as shobf::seedKey() — the seed-derived Auto key:
+// `str` must be a non-empty string literal; `key` may be a literal or any
+// constexpr key object such as shobf::seedKey():
 //
 //     shobf::decryptAuto(SHOBF_OBFUSCATE("secret", shobf::seedKey()));
 // --------------------------------------------------------------------------
@@ -2143,11 +2066,8 @@ struct Obfuscated
     operator std::string_view() const noexcept { return data; }
 };
 
-// Raw-binary ciphertext produced by the SHOBF_OBFUSCATE macros. Deliberately
-// NOT convertible to const char*/string_view: raw bytes are not text, and an
-// implicit conversion would let them slip into the hex-based API unnoticed.
-// Use the typed decrypt()/decryptBytes()/decryptAuto()/decryptAutoBytes()
-// overloads below instead.
+// Raw-binary ciphertext from the SHOBF_OBFUSCATE macros. Deliberately NOT
+// convertible to const char*/string_view. Use the typed decrypt() overloads instead.
 template <size_t N>
 struct Encrypted
 {
@@ -2242,7 +2162,7 @@ constexpr Encrypted<HN / 2> hexToBytes(const Obfuscated<HN>& h)
     return out;
 }
 
-} // namespace detail
+}
 
 #define SHOBF_OBFUSCATE(str, key)                                              \
     []() -> ::shobf::Encrypted<(sizeof(str) - 1)> {                            \
@@ -2274,22 +2194,18 @@ constexpr Encrypted<HN / 2> hexToBytes(const Obfuscated<HN>& h)
 // Variation 2: build-seed-derived session key.
 //
 // The Auto API uses one process-wide key derived at COMPILE TIME from
-// SHOBF_BUILD_SEED (a random 64-bit value your build system passes with
-// -DSHOBF_BUILD_SEED=0x...). Without the define, __DATE__/__TIME__ are hashed
-// instead — the key then changes on every rebuild. The derived key itself is
-// not stored in the binary; only the seed is.
+// SHOBF_BUILD_SEED (pass -DSHOBF_BUILD_SEED=0x...). Without it,
+// __DATE__/__TIME__ are hashed, so the key changes every rebuild.
 // --------------------------------------------------------------------------
 
-// The seed-derived Auto key (32 printable ASCII chars). Fully constexpr, so
-// it can be used both as a macro key argument and inspected at runtime.
+// The seed-derived Auto key (32 printable ASCII chars). Fully constexpr.
 inline constexpr Obfuscated<detail::kAutoKeyLen + 1> seedKey()
 {
     constexpr size_t Len = detail::kAutoKeyLen;
     Obfuscated<Len + 1> out{};
     uint64_t z = detail::buildSeedValue();
     for (size_t i = 0; i < Len; ++i) {
-        z = detail::mix64(z);                       // splitmix64 stream
-        // Map to printable ASCII (33..126): safe to log, safe in strings.
+        z = detail::mix64(z);
         out.data[i] = char(33 + ((z >> 33) % 94));
     }
     out.data[Len] = '\0';
@@ -2321,8 +2237,8 @@ inline std::string decryptAuto(std::string_view hexCipher,
 
 // --------------------------------------------------------------------------
 // Typed overloads for macro-produced raw ciphertext (shobf::Encrypted<N>).
-// The bytes are re-hexed on the CPU into a transient buffer, then handed to
-// the regular GPU pipeline — identical results, no shader involvement.
+// The bytes are re-hexed on the CPU into a transient buffer, then fed the
+// regular GPU pipeline.
 // --------------------------------------------------------------------------
 
 template <size_t N>
@@ -2363,4 +2279,4 @@ inline std::string decryptAuto(const Encrypted<N>& cipher,
     return std::string(bytes.begin(), bytes.end());
 }
 
-} // namespace shobf
+}

@@ -1,25 +1,4 @@
-// ============================================================================
-// main.cpp — usage example for shader_obfuscate.hpp
-//
-// Encryption happens on the CPU at COMPILE TIME (SHOBF_OBFUSCATE /
-// SHOBF_OBFUSCATE_RC4 macros); decryption happens on the GPU at runtime.
-// The plaintext below never exists in the compiled binary, and the
-// ciphertext is stored as opaque RAW BYTES — nothing text-shaped shows up:
-//     strings ./shader-obfuscator | grep "This string was decrypted"   (no match)
-//     strings ./shader-obfuscator | grep -E '^[0-9a-f]{16,}$'           (no match)
-//
-// Configuration is a set of macros defined BEFORE the #include (standard
-// single-header pattern). In this repo the CMake project drives the backend,
-// SHOBF_NO_DEBUG and shader precompilation via -DSHOBF_* options (see
-// crackme.cpp's header comment for the full list); the seed below is one you
-// can set right here in source.
-//
-// Build: cmake -S . -B build && cmake --build build
-//        (SHOBF_BUILD_SEED below is optional; without it __DATE__/__TIME__ are
-//         hashed, which changes the Auto key on every rebuild.)
-// ============================================================================
-
-// Seed for the compile-time session key (any 64-bit value). Optional here.
+// Seed for the compile-time session key.
 #define SHOBF_BUILD_SEED 0x0123456789ABCDEF
 
 #include "shader_obfuscate.hpp"
@@ -28,8 +7,7 @@
 #include <iostream>
 #include <string>
 
-// Interop helpers for the demo only: render raw ciphertext bytes as lowercase
-// hex (the format SHOBF_OBFUSCATE_HEX produces directly).
+// Demo-only helpers: render raw ciphertext bytes as lowercase hex.
 inline char hexDigit(uint8_t v) { return v < 10 ? char('0' + v) : char('a' + v - 10); }
 static std::string toHex(const uint8_t* p, size_t n)
 {
@@ -49,21 +27,15 @@ static std::string toHex(const shobf::Encrypted<N>& c)
 
 int main()
 {
-    // shobf::setValidationEnabled(true);   // optional: Khronos validation layers
-
-    // === CONFIG =============================================================
-    // These two literals are encrypted by the compiler (constexpr evaluation)
-    // into raw-byte ciphertexts. Only those bytes end up in the binary.
-    // =========================================================================
     static constexpr char kDemoKey[] = "vulkan";
 
-    // XOR-encrypted at compile time -> decrypt with Algorithm::Xor (default)
+    // XOR-encrypted at compile time.
     static const auto kEncrypted =
         SHOBF_OBFUSCATE(
             "Hello from the GPU! This string was decrypted by a GPU "
             "compute shader.", "vulkan");
 
-    // Same plaintext, RC4-encrypted at compile time -> Algorithm::Rc4
+    // Same plaintext, RC4-encrypted.
     static const auto kRc4Encrypted =
         SHOBF_OBFUSCATE_RC4(
             "Hello from the GPU! This string was decrypted by a GPU "
@@ -75,10 +47,6 @@ int main()
         std::cout << " backend: " << shobf::backendName() << "\n";
         std::cout << "=====================================================\n\n";
 
-        // ------------------------------------------------------------------
-        // Variation 1: explicit key. Ciphertext was produced by the compiler;
-        // decryption runs on the GPU.
-        // ------------------------------------------------------------------
         std::cout << "[1] VARIATION 1 - decrypt with an explicit key\n";
         std::cout << "    Ciphertext (hex): " << toHex(kEncrypted) << "\n";
         std::cout << "    Key used        : \"" << kDemoKey << "\"\n";
@@ -86,16 +54,11 @@ int main()
         const std::string secret = shobf::decrypt(kEncrypted, kDemoKey);
         std::cout << "    Decrypted text  : " << secret << "\n\n";
 
-        // ------------------------------------------------------------------
-        // Variation 2: the Auto API uses one session key derived at COMPILE
-        // TIME from SHOBF_BUILD_SEED (or __DATE__/__TIME__ if the define is
-        // absent). Ciphertexts made with shobf::seedKey() as the macro key
-        // decrypt through decryptAuto() — no key literal appears anywhere.
-        // ------------------------------------------------------------------
+        // Auto API: session key derived at compile time from SHOBF_BUILD_SEED;
+        // no key literal appears anywhere.
         std::cout << "[2] VARIATION 2 - seed-derived session key\n";
         std::cout << "    Session key         : \"" << shobf::runtimeKey() << "\"\n";
 
-        // Compile-time XOR ciphertext under the derived key (no literal key!)
         static const auto kAuto = SHOBF_OBFUSCATE(
             "Hello from the GPU! This string was decrypted by a GPU "
             "compute shader.", shobf::seedKey());
@@ -104,9 +67,6 @@ int main()
         std::cout << "    Same as variation 1 : "
                   << (shobf::decryptAuto(kAuto) == secret ? "yes" : "NO") << "\n\n";
 
-        // ------------------------------------------------------------------
-        // RC4 algorithm: identical flow, Algorithm::Rc4 instead of Xor.
-        // ------------------------------------------------------------------
         std::cout << "[3] RC4 ALGORITHM - decrypt with an explicit key\n";
         std::cout << "    Ciphertext (hex): " << toHex(kRc4Encrypted) << "\n";
         std::cout << "    Key used        : \"" << kDemoKey << "\"\n";
@@ -117,11 +77,8 @@ int main()
         std::cout << "    Same as XOR     : "
                   << (rc4Secret == secret ? "yes" : "NO") << "\n\n";
 
-        // ------------------------------------------------------------------
-        // Known-answer test: published RC4 vector. Decrypting the published
-        // ciphertext bbf316e8d940af0ad3 with key "Key" must give "Plaintext".
-        // (Stored as raw bytes here so no hex text lands in the binary.)
-        // ------------------------------------------------------------------
+        // Known-answer test: key "Key", ciphertext bbf316e8d940af0ad3, must
+        // give "Plaintext". Raw bytes so no hex text lands in the binary.
         std::cout << "[4] RC4 KNOWN-ANSWER TEST (published vector)\n";
         static const uint8_t katCt[] = {0xbb, 0xf3, 0x16, 0xe8,
                                         0xd9, 0x40, 0xaf, 0x0a, 0xd3};
@@ -134,12 +91,7 @@ int main()
         std::cout << "    Result           : "
                   << (katPlain == "Plaintext" ? "PASS" : "FAIL") << "\n\n";
 
-        // ------------------------------------------------------------------
-        // Error handling demo: these two calls use DELIBERATELY BROKEN input,
-        // so the library throws an exception. We catch each one and print its
-        // message to show what happens with malformed ciphertexts. This is
-        // intentional — not a bug in this program.
-        // ------------------------------------------------------------------
+        // Error handling: intentionally broken ciphertexts must throw.
         std::cout << "[5] ERROR HANDLING DEMO - intentionally broken ciphertexts\n";
         std::cout << "    (the library throws shobf::Error; caught & printed below)\n";
 

@@ -1,16 +1,6 @@
-// gen_shader_dxbc.cpp — build-time helper that compiles shader_obfuscate.hlsl
-// to a cs_5_0 DXBC blob using d3dcompiler_47.dll's D3DCompile.
-//
-// Used by build_shader.py (SHOBF_D3D11_PRECOMPILED mode) so the HLSL source is
-// never embedded in the shipped binary. It is deliberately the SAME compiler
-// (and same D3DCOMPILE_SKIP_OPTIMIZATION) that the runtime path uses, so the
-// produced blob is accepted by both native Windows D3D11 and wine's
-// vkd3d-shader-backed CreateComputeShader — unlike standalone dxc.exe output.
-//
-// The emitted .dxbc is a build artifact only; this helper itself is never
-// shipped. On a Linux cross-build it is compiled with mingw and run under
-// wine; on native Windows it runs directly.
-//
+// Build-time helper: compiles shader_obfuscate.hlsl to a cs_5_0 DXBC blob via
+// D3DCompile (d3dcompiler_47.dll), so no HLSL text ships. Same compiler as the
+// runtime path
 // Usage: gen_shader_dxbc.exe out.dxbc  (reads shader_obfuscate.hlsl from CWD)
 #include <windows.h>
 #include <d3dcompiler.h>
